@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>协同过滤（User-Based CF）交互沙盒</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        }
+        h2 { text-align: center; color: #2c3e50; margin-top: 0; }
+        .main-layout {
+            display: flex;
+            gap: 30px;
+            margin-top: 20px;
+        }
+        .control-panel {
+            flex: 1;
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+        .visual-panel {
+            flex: 1.2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .slider-group {
+            margin-bottom: 18px;
+            background: #fff;
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 4px solid #3498db;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .slider-group.charlie { border-left-color: #e67e22; }
+        .slider-title { font-weight: bold; margin-bottom: 8px; font-size: 14px; color: #34495e; }
+        .slider-item { display: flex; align-items: center; margin-bottom: 5px; }
+        .slider-item label { width: 90px; font-size: 13px; }
+        .slider-item input { flex: 1; margin: 0 10px; }
+        .slider-item .val { width: 25px; font-weight: bold; text-align: right; color: #2c3e50; }
+        canvas {
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background: #fff;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+        }
+        .formula-box {
+            margin-top: 15px;
+            background: #1e293b;
+            color: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            width: 100%;
+            box-sizing: border-box;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .highlight-blue { color: #38bdf8; font-weight: bold; }
+        .highlight-orange { color: #fb923c; font-weight: bold; }
+        .highlight-green { color: #4ade80; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>协同过滤 (User-Based CF) 原理动态沙盒</h2>
+    <p style="color: #666; font-size: 14px; text-align: center;">拖动左侧滑块改变邻居用户的评分，实时观察他们与 Alice 的向量夹角（相似度）以及对电影 C 的预测得分。</p>
+    
+    <div class="main-layout">
+        <!-- 左侧控制面板 -->
+        <div class="control-panel">
+            <!-- Bob 控件 -->
+            <div class="slider-group">
+                <div class="slider-title">邻居 1: Bob 的评分</div>
+                <div class="slider-item">
+                    <label>电影 A (喜好):</label>
+                    <input type="range" id="bobA" min="1" max="5" value="4" step="1">
+                    <span class="val" id="bobA_val">4</span>
+                </div>
+                <div class="slider-item">
+                    <label>电影 B (厌恶):</label>
+                    <input type="range" id="bobB" min="1" max="5" value="2" step="1">
+                    <span class="val" id="bobB_val">2</span>
+                </div>
+                <div class="slider-item">
+                    <label>电影 C (目标):</label>
+                    <input type="range" id="bobC" min="1" max="5" value="5" step="1">
+                    <span class="val" id="bobC_val">5</span>
+                </div>
+            </div>
+
+            <!-- Charlie 控件 -->
+            <div class="slider-group charlie">
+                <div class="slider-title">邻居 2: Charlie 的评分</div>
+                <div class="slider-item">
+                    <label>电影 A (喜好):</label>
+                    <input type="range" id="charlieA" min="1" max="5" value="1" step="1">
+                    <span class="val" id="charlieA_val">1</span>
+                </div>
+                <div class="slider-item">
+                    <label>电影 B (厌恶):</label>
+                    <input type="range" id="charlieB" min="1" max="5" value="5" step="1">
+                    <span class="val" id="charlieB_val">5</span>
+                </div>
+                <div class="slider-item">
+                    <label>电影 C (目标):</label>
+                    <input type="range" id="charlieC" min="1" max="5" value="1" step="1">
+                    <span class="val" id="charlieC_val">1</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧画布与数学推导面板 -->
+        <div class="visual-panel">
+            <canvas id="cfCanvas" width="500" height="340"></canvas>
+            
+            <div class="formula-box" id="formulaBox">
+                <!-- 由 JS 动态填充 -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 固定 Target User Alice 的喜好向量 [电影A=5, 电影B=1]
+    const alice = { a: 5, b: 1 };
+
+    // 获取 DOM 元素
+    const inputs = ['bobA', 'bobB', 'bobC', 'charlieA', 'charlieB', 'charlieC'];
+    const canvas = document.getElementById('cfCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // 绑定事件监听
+    inputs.forEach(id => {
+        document.getElementById(id).addEventListener('input', function() {
+            document.getElementById(id + '_val').innerText = this.value;
+            update();
+        });
+    });
+
+    // 计算余弦相似度
+    function cosineSimilarity(v1, v2) {
+        let dotProduct = (v1.a * v2.a) + (v1.b * v2.b);
+        let norm1 = Math.sqrt(v1.a * v1.a + v1.b * v1.b);
+        let norm2 = Math.sqrt(v2.a * v2.a + v2.b * v2.b);
+        if (norm1 === 0 || norm2 === 0) return 0;
+        return dotProduct / (norm1 * norm2);
+    }
+
+    // 绘制与计算主逻辑
+    function update() {
+        // 1. 获取当前滑动条数值
+        const bA = parseInt(document.getElementById('bobA').value);
+        const bB = parseInt(document.getElementById('bobB').value);
+        const bC = parseInt(document.getElementById('bobC').value);
+
+        const cA = parseInt(document.getElementById('charlieA').value);
+        const cB = parseInt(document.getElementById('charlieB').value);
+        const cC = parseInt(document.getElementById('charlieC').value);
+
+        const bob = { a: bA, b: bB };
+        const charlie = { a: cA, b: cB };
+
+        // 2. 计算相似度
+        const simBob = cosineSimilarity(alice, bob);
+        const simCharlie = cosineSimilarity(alice, charlie);
+
+        // 3. 计算对电影 C 的加权预测分
+        let numerator = (simBob * bC) + (simCharlie * cC);
+        let denominator = Math.abs(simBob) + Math.abs(simCharlie);
+        let predictedRating = denominator !== 0 ? (numerator / denominator) : 0;
+
+        // 4. 清空并重绘 Canvas 坐标系（展示用户在 电影A-电影B 空间中的兴趣特征向量）
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const originX = 50;
+        const originY = 290;
+        const scale = 45; // 缩放比例
+
+        // 绘制坐标轴网格
+        ctx.strokeStyle = '#f1f5f9';
+        ctx.lineWidth = 1;
+        for(let i=1; i<=6; i++) {
+            // 横网格
+            ctx.beginPath(); ctx.moveTo(originX, originY - i*scale); ctx.lineTo(originX + 6*scale, originY - i*scale); ctx.stroke();
+            // 纵网格
+            ctx.beginPath(); ctx.moveTo(originX + i*scale, originY); ctx.lineTo(originX + i*scale, originY - 6*scale); ctx.stroke();
+        }
+
+        // 绘制主坐标轴
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(originX, 20); ctx.lineTo(originX, originY); ctx.lineTo(canvas.width - 20, originY); ctx.stroke();
+
+        // 轴标签
+        ctx.fillStyle = '#475569';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('电影 A 评分 ➔', canvas.width - 90, originY + 20);
+        ctx.save();
+        ctx.translate(originX - 15, 90);
+        ctx.rotate(-Math.PI/2);
+        ctx.fillText('电影 B 评分 ➔', 0, 0);
+        ctx.restore();
+
+        // 刻度值
+        for(let i=1; i<=5; i++) {
+            ctx.fillText(i, originX + i*scale - 4, originY + 15);
+            ctx.fillText(i, originX - 15, originY - i*scale + 4);
+        }
+
+        // 函数：绘制向量箭头
+        function drawVector(x, y, color, label) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(originX, originY);
+            ctx.lineTo(originX + x*scale, originY - y*scale);
+            ctx.stroke();
+            
+            // 绘制端点圆圈
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(originX + x*scale, originY - y*scale, 5, 0, Math.PI*2);
+            ctx.fill();
+
+            // 绘制文本标签
+            ctx.font = 'bold 12px sans-serif';
+            ctx.fillText(label, originX + x*scale + 8, originY - y*scale - 4);
+        }
+
+        // 绘制三个用户的向量
+        drawVector(alice.a, alice.b, '#3498db', `Alice [5, 1]`);
+        drawVector(bob.a, bob.b, '#2ecc71', `Bob [${bA}, ${bB}]`);
+        drawVector(charlie.a, charlie.b, '#e67e22', `Charlie [${cA}, ${cB}]`);
+
+        // 5. 更新下方的数学计算公示文本面板
+        document.getElementById('formulaBox').innerHTML = `
+<div><strong>1. 实时夹角余弦相似度计算 (Cosine Similarity):</strong></div>
+<div>• Sim(Alice, <span class="highlight-blue">Bob</span>)     = ${simBob.toFixed(3)} ${simBob > 0.8 ? '🔥(口味极度契合)' : '(口味一般)'}</div>
+<div>• Sim(Alice, <span class="highlight-orange">Charlie</span>) = ${simCharlie.toFixed(3)}</div>
+
+<div style="margin-top: 10px;"><strong>2. 目标电影 C 推荐分数预测 (Weighted Average):</strong></div>
+<div style="border-top: 1px dashed #475569; margin: 5px 0; padding-top: 5px;">
+    预测分 = $\\frac{Sim(Bob) \\times R_{Bob} + Sim(Charlie) \\times R_{Charlie}}{Sim(Bob) + Sim(Charlie)}$
+</div>
+<div>代入实时数据:</div>
+<div>预测分 = $\\frac{(${simBob.toFixed(2)} \\times <span class="highlight-blue">${bC}分</span>) + (${simCharlie.toFixed(2)} \\times <span class="highlight-orange">${cC}分</span>)}{${simBob.toFixed(2)} + ${simCharlie.toFixed(2)}}$</div>
+<div style="font-size: 15px; margin-top: 5px;">最终 Alice 对电影 C 的预测得分: <span class="highlight-green">${predictedRating.toFixed(2)} 分</span> (满分 5)</div>
+        `;
+    }
+
+    // 页面初次加载执行一次
+    update();
+</script>
+
+</body>
+</html>
